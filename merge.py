@@ -5,20 +5,10 @@ from shapely.geometry import MultiPoint, mapping
 
 
 CITY_DATA = [{
-    "name": "Seattle",
-    "key": "wa.seattle",
-    "center": [-122.339, 47.604, 15],
-    "transportation_data": "./cities/seattle/output/transportation.geojson",
-}, {
-    "name": "Mt. Vernon",
-    "key": "wa.mtvernon",
-    "center": [-122.336, 48.419, 14],
-    "transportation_data": "./cities/mtvernon/output/transportation.geojson",
-}, {
-    "name": "Bellingham",
-    "key": "wa.bellingham",
-    "center": [-122.478, 48.751, 13.5],
-    "transportation_data": "./cities/bellingham/output/transportation.geojson"
+    "name": "Bath",
+    "key": "uk.bath",
+    "center": [-2.3599, 51.3758, 15],    #51.3758, -2.3599
+    "transportation_data": "./cities/bath/output/transportation.geojson",
 }]
 
 
