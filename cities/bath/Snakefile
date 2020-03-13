@@ -411,6 +411,111 @@ rule collect:
             shell('cp {inpath} {outpath}'.format(inpath=in_path, outpath=out_path))
 
 
+rule standardize:
+    input:
+        ['interim/noded/crossings.geojson',
+         'interim/noded/sidewalks.geojson']
+    output:
+        "output/transportation.geojson"
+    run:
+        transportation = {
+            "type": "FeatureCollection",
+            "features": []
+        }
+
+        # Crossings - standardize to new schema
+        with open(input[0]) as f:
+            cr = json.load(f)
+
+        for feature in cr["features"]:
+            props = feature["properties"]
+            new_props = {}
+            new_props["subclass"] = "footway"
+            new_props["footway"] = "crossing"
+            if "marked" in props:
+                if props["marked"]:
+                    new_props["crossing"] = "marked"
+                else:
+                    new_props["crossing"] = "unmarked"
+            if "curbramps" in props:
+                new_props["curbramps"] = props["curbramps"]
+            if "length" in props:
+                new_props["length"] = props["length"]
+            if "street_name" in props:
+                new_props["description"] = "Crossing at {}".format(props["street_name"])
+
+            transportation["features"].append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": new_props
+            })
+
+        # Sidewalks - standardize to new schema
+        with open(input[1]) as f:
+            sw = json.load(f)
+
+        for feature in sw["features"]:
+            props = feature["properties"]
+            new_props = {}
+            new_props["subclass"] = "footway"
+            new_props["footway"] = "sidewalk"
+            if "incline" in props:
+                new_props["incline"] = props["incline"]
+            if "surface" in props:
+                new_props["surface"] = props["surface"]
+            if "width" in props:
+                new_props["width"] = props["width"]
+            if "length" in props:
+                new_props["length"] = props["length"]
+            if "layer" in props:
+                new_props["layer"] = props["layer"]
+            if "side" in props and "street_name" in props:
+                new_props["description"] = "Sidewalk {} of {}".format(props["side"], props["street_name"])
+
+            transportation["features"].append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": new_props
+            })
+
+        # Elevator path(s) - standardize to new schema
+        # with open(input[2]) as f:
+        #     el = json.load(f)
+        #
+        # for feature in el["features"]:
+        #     props = feature["properties"]
+        #     new_props = {}
+        #     # TODO: retain original OpenStreetMap data tags - clarify corridors vs.
+        #     # footways.
+        #     new_props["subclass"] = "footway"
+        #     new_props["elevator"] = 1
+        #     if "indoor" in props:
+        #         new_props["indoor"] = props["indoor"]
+        #     if "layer" in props:
+        #         new_props["layer"] = props["layer"]
+        #         if props["layer"] == 1:
+        #             # Is bridge (or on-ramp, etc)
+        #             new_props["brunnel"] = "bridge"
+        #         elif props["layer"] == -1:
+        #             # Is tunnel
+        #             new_props["brunnel"] = "tunnel"
+        #     if "length" in props:
+        #         new_props["length"] = props["length"]
+        #     if "opening_hours" in props:
+        #         new_props["opening_hours"] = props["opening_hours"]
+        #     if "via" in props:
+        #         new_props["description"] = "Elevator via {}".format(props["via"])
+        #
+        #     transportation["features"].append({
+        #         "type": "Feature",
+        #         "geometry": feature["geometry"],
+        #         "properties": new_props
+        #     })
+
+        with open(output[0], "w") as g:
+            json.dump(transportation, g)
+
+
 
 def nodes_to_geojson(path_in, path_out, keep=None):
     if keep is None:
