@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 import zipfile
+import geopandas as gpd
 
 import networkx as nx
 from osmread import parse_file, Node, Way
@@ -26,9 +27,7 @@ bath = 'https://www.openstreetmap.org/api/0.6/map?bbox=-2.3814836797,51.37443701
 
 rule all:
     input:
-        expand('output/{layer}.geojson', layer=['sidewalks', 'crossings', 'footways',
-                                                'pedestrian_roads', 'footyes', 'stairs',
-                                                'kerbs', 'elevators'])
+        'output/transportation.geojson'
 
 rule fetch_osm:
     input:
@@ -237,90 +236,23 @@ rule add_lengths:
                 json.dump(layer, f)
 
 
-# rule add_inclines:
-#     input:
-#         ['interim/dem/elevations.geojson',
-#          'interim/lengthed/sidewalks.geojson',
-#          'interim/lengthed/footways.geojson',
-#          'interim/lengthed/pedestrian_roads.geojson',
-#          'interim/lengthed/footyes.geojson']
-#     output:
-#         ['interim/inclined/sidewalks.geojson',
-#          'interim/inclined/footways.geojson',
-#          'interim/inclined/pedestrian_roads.geojson',
-#          'interim/inclined/footyes.geojson']
-#     run:
-#         with open(input[0]) as f:
-#             el = json.load(f)
-#         # Project to UTM
-#         wgs84 = pyproj.Proj(init='epsg:4326')
-#         utm = pyproj.Proj(init='epsg:26910')
-#
-#         # Create interpolator
-#         xs = []
-#         ys = []
-#         zs = []
-#
-#         for point in el['features']:
-#             coords = point['geometry']['coordinates']
-#             x, y = pyproj.transform(wgs84, utm, coords[0], coords[1])
-#             xs.append(x)
-#             ys.append(y)
-#             zs.append(point['properties']['elevation'])
-#             point['geometry']['coordinates'] = [x, y]
-#
-#         # Start interpolating elevations, calculate incline
-#         xys = list(zip(xs, ys))
-#         convex_hull = LinearRing(MultiPoint(xys).convex_hull.exterior.coords)
-#
-#         interpolate = scipy.interpolate.LinearNDInterpolator(xys, zs, fill_value=-1000)
-#
-#         # Extract inclines
-#         for in_path, out_path in zip(input[1:], output):
-#             with open(in_path) as f:
-#                 sw = json.load(f)
-#
-#             for way in sw['features']:
-#                 if way['properties']['length'] < 3:
-#                     way['properties']['incline'] = 0
-#                     continue
-#
-#                 start_lonlat = way['geometry']['coordinates'][0]
-#                 end_lonlat = way['geometry']['coordinates'][-1]
-#
-#                 eles = []
-#                 for point in [start_lonlat, end_lonlat]:
-#                     in_utm = pyproj.transform(wgs84, utm, point[0], point[1])
-#                     ele = interpolate(*in_utm)
-#
-#                     if ele == -1000:
-#                         # Failed to interpolate - use convex hull as representative
-#                         # elevation
-#                         pt = Point(in_utm)
-#                         nearest = convex_hull.interpolate(convex_hull.project(pt))
-#
-#                         # Give it a 1-meter nudge 'inwards' so we're guaranteed to get an
-#                         # interpolate result
-#                         dx = nearest.x - pt.x
-#                         dy = nearest.y - pt.y
-#                         dist = (dx**2 + dy**2)**.5
-#                         dx = 1 * dx / dist
-#                         dy = 1 * dy / dist
-#                         x = nearest.x + dx
-#                         y = nearest.y + dy
-#                         ele = interpolate(x, y)
-#
-#                     eles.append(ele)
-#
-#                 incline = (eles[1] - eles[0]) / way['properties']['length']
-#                 incline = int(1000 * incline)
-#                 if incline > 999:
-#                     incline = 999
-#
-#                 way['properties']['incline'] = incline
-#
-#             with open(out_path, 'w') as f:
-#                 json.dump(sw, f)
+rule add_inclines:
+    input:
+        ['interim/lengthed/sidewalks.geojson',
+         'interim/lengthed/footways.geojson',
+         'interim/lengthed/pedestrian_roads.geojson',
+         'interim/lengthed/footyes.geojson']
+    output:
+        ['interim/inclined/sidewalks.geojson',
+         'interim/inclined/footways.geojson',
+         'interim/inclined/pedestrian_roads.geojson',
+         'interim/inclined/footyes.geojson']
+    run:
+        for in_path, out_path in zip(input[1:], output):
+            with open(in_path) as inf:
+                sw = json.load(inf)
+            with open(out_path, 'w') as outf:
+                json.dump(sw, outf)
 
 
 rule node:
@@ -403,7 +335,7 @@ rule collect:
          'interim/extracted/kerbs.geojson',
          'interim/extracted/elevators.geojson']
     output:
-        expand('output/{layer}.geojson',
+        expand('interim/collect/{layer}.geojson',
                layer=['sidewalks', 'crossings', 'footways', 'pedestrian_roads',
                       'footyes', 'stairs', 'kerbs', 'elevators'])
     run:
@@ -411,10 +343,79 @@ rule collect:
             shell('cp {inpath} {outpath}'.format(inpath=in_path, outpath=out_path))
 
 
+rule add_kerb_crossings:
+    input:
+        ['interim/collect/kerbs.geojson',
+         'interim/collect/crossings.geojson']
+    output:
+        'interim/annotated/crossings.geojson'
+    run:
+        kerbs     = gpd.read_file(input[0])
+        crossings = gpd.read_file(input[1])
+
+        kerbsUTM     = dh.utm.gdf_to_utm(kerbs)
+        crossingsUTM = dh.utm.gdf_to_utm(crossings)
+
+
+        #Does a crossing have usble kerbs?
+        #if so mark `curbramps` = true
+        print("------------")
+        print(kerbsUTM)
+        print("------------")
+        print(crossingsUTM)
+        print("------------")
+
+        rows = []
+        for cIdx, row in crossingsUTM.iterrows():
+            cross = row.geometry
+
+            for kIdx, kurb in kerbsUTM.iterrows():
+                kurbGeo = kurb.geometry
+                curbramp = (kurbGeo.intersects(cross))
+
+                # st_row = st.loc[st['id'] == row['st_pkey']].iloc[0]
+                #
+                # sw_left = sw.loc[sw['pkey'] == st_row['pkey_left']]
+                # if not sw_left.shape[0]:
+                #     continue
+                # sw_left = sw_left.iloc[0]
+                #
+                # sw_right = sw.loc[sw['pkey'] == st_row['pkey_right']]
+                # if not sw_right.shape[0]:
+                #     continue
+                # sw_right = sw_right.iloc[0]
+                #
+                # geom_left = sw_left['geometry']
+                # geom_right = sw_right['geometry']
+                #
+                # left = geom_left.interpolate(geom_left.project(geom))
+                # right = geom_right.interpolate(geom_right.project(geom))
+                # crossing_geom = LineString([left, right])
+                #
+                # cr_left = (crossingsUTM['sw_pkey'] == sw_left['pkey']).sum()
+                # cr_right = (crossingsUTM['sw_pkey'] == sw_left['pkey']).sum()
+                if curbramp: #this is wrong check more...
+                    curbramps = True
+                else:
+                    curbramps = False
+
+                new = {}
+                new['geometry'] = cross
+                new['curbramps'] = curbramps
+                new['kerb_raised'] = False
+
+            rows.append(new)
+
+        annotatedCrossings = gpd.GeoDataFrame(rows)
+        annotatedCrossings.crs = crossings.crs
+        annotatedCrossings = annotatedCrossings.to_crs({'init': 'epsg:4326'})
+        dh.io.gdf_to_geojson(annotatedCrossings, output[0])
+
+
 rule standardize:
     input:
-        ['interim/noded/crossings.geojson',
-         'interim/noded/sidewalks.geojson']
+        ['interim/annotated/crossings.geojson',
+         'interim/collect/sidewalks.geojson']
     output:
         "output/transportation.geojson"
     run:
@@ -425,9 +426,9 @@ rule standardize:
 
         # Crossings - standardize to new schema
         with open(input[0]) as f:
-            cr = json.load(f)
+            crossings = json.load(f)
 
-        for feature in cr["features"]:
+        for feature in crossings["features"]:
             props = feature["properties"]
             new_props = {}
             new_props["subclass"] = "footway"
@@ -452,9 +453,9 @@ rule standardize:
 
         # Sidewalks - standardize to new schema
         with open(input[1]) as f:
-            sw = json.load(f)
+            sidewalks = json.load(f)
 
-        for feature in sw["features"]:
+        for feature in sidewalks["features"]:
             props = feature["properties"]
             new_props = {}
             new_props["subclass"] = "footway"
